@@ -17,9 +17,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "boox-ink-bridge"
 
-// The Onyx pen pipeline wrapper lives in its own repo, checked out beside this one.
-include(":inkcontroller")
-project(":inkcontroller").projectDir = file("../inksdk/inkcontroller")
-
 include(":spike")
 include(":app")

@@ -35,7 +35,12 @@ configurations.all {
 }
 
 dependencies {
-    implementation(project(":inkcontroller"))
+    // Onyx's pen SDK, fetched from Boox's Maven repository at build time. Not part of this
+    // project and not covered by its licence; see NOTICE.
+    implementation("com.onyx.android.sdk:onyxsdk-pen:1.5.2")
+    implementation("com.onyx.android.sdk:onyxsdk-device:1.3.3")
+    // The Onyx SDK reaches hidden framework APIs; without this it fails on Android 14 and later.
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:4.3")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.java-websocket:Java-WebSocket:1.5.7")
 

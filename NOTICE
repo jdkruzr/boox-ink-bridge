@@ -1,0 +1,28 @@
+boox-ink-bridge
+Copyright 2026 jdkruzr
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This licence covers the source code in this repository only.
+
+Third-party software
+--------------------
+
+The app this repository builds links against the following, none of which is
+part of this project:
+
+- Onyx pen and device SDKs (com.onyx.android.sdk:onyxsdk-pen,
+  com.onyx.android.sdk:onyxsdk-device), by Onyx International. Proprietary
+  binaries downloaded from Onyx's Maven repository (repo.boox.com) at build
+  time. They are not redistributed here in source form, they are not covered
+  by this project's licence, and their use is subject to Onyx's own terms.
+
+- Java-WebSocket (org.java-websocket:Java-WebSocket), MIT License.
+
+- HiddenApiBypass (org.lsposed.hiddenapibypass:hiddenapibypass),
+  Apache License 2.0.
+
+- AndroidX libraries, Apache License 2.0.
+
+"Boox" and "Onyx" are trademarks of their owner. This project is not affiliated
+with or endorsed by Onyx International.
