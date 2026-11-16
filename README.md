@@ -20,7 +20,7 @@ Early and working, on one device.
 - The only plugin that speaks the protocol so far is a development branch of
   [Handwriting](https://github.com/jdkruzr/handwriting/tree/boox-bridge) for Obsidian.
   It is not in a released version of that plugin.
-- Notes work. PDF support is written on the plugin side and untested on hardware.
+- Notes and PDFs both work on that device.
 - The firmware preview is a constant-width line in the pen colour selected in the
   plugin. Its width is the plugin's estimate of how heavy the stored stroke will be, so
   the weight holds at pen-up; the stored stroke still varies with pressure and the
