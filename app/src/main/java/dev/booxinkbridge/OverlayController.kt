@@ -26,7 +26,8 @@ import com.onyx.android.sdk.pen.data.TouchPointList
  * WHO OWNS THE SCREEN. While the firmware renders pen ink, nothing else on the panel
  * repaints. So the firmware gets the screen only while the pen is about: it is taken when
  * the pen comes into range (`onPenActive`) and given back a short time after the pen lifts
- * (`onPenUpRefresh`), or when the pen hovered in and left without touching (the watchdog).
+ * (`onPenUpRefresh`) - later if the pen is still hovering, since the next stroke would take
+ * it straight back - or when the pen hovered in and left without touching (the watchdog).
  * Render is switched with `setRawDrawingRenderEnabled`, never `setRawDrawingEnabled`: the
  * latter also stops the SDK reading the pen, and then nothing reports the pen coming back.
  */
@@ -72,8 +73,16 @@ class OverlayController(
             field = value
             applyWidth()
         }
-    /** How the written area is refreshed after the firmware lets go: 0 not at all, 1 the SDK's handwriting repaint, 2 GC, 3 REGAL. */
-    var repaintMode = 1
+    /**
+     * How the written area is refreshed after the firmware lets go: 0 not at all, 1 the SDK's
+     * handwriting repaint, then region refreshes in 2 GC, 3 REGAL, 4 DU, 5 GU, 6 GU_FAST.
+     * DU is the default: on a Note Mini C it made the swap without the heavy flash of 1.
+     */
+    var repaintMode = 4
+    /** When a release was put off because the pen was still near; 0 when none is waiting. */
+    @Volatile private var waitingSince = 0L
+    /** Repaint the written area after every release, not only one a pen-down cut short. */
+    var repaintAlways = true
     /** Bounds, in overlay px, of what has been written since the last repaint. */
     private val written = Rect()
     /** What was written before the last release, and when that release was. */
@@ -311,13 +320,13 @@ class OverlayController(
     }
 
     /**
-     * Ask the panel for a clean refresh of what was written.
+     * Ask the panel to show what the app underneath has drawn where the pen wrote.
      *
-     * When the firmware lets go, the panel swaps its strokes for the app's own. Left alone
-     * that comes out clean. Interrupted, by the firmware taking the screen back for the next
-     * stroke, it stops half way: on a colour panel the strokes stay tinted and blotchy until
-     * something else redraws them. This is that redraw. It flashes, so it runs only after an
-     * interruption, never on an ordinary release.
+     * Leaving scribble mode does not do that by itself. The firmware's ink stays on the
+     * panel until the app next changes those pixels, and the app drew its stroke while the
+     * screen was frozen, so often nothing prompts it: the firmware's line sat there until a
+     * scroll, and then visibly changed weight. Found on a Note Mini C by reading the
+     * WebView's canvases while the panel showed something else.
      */
     private fun repaintWritten() {
         val sv = view ?: return
@@ -333,11 +342,43 @@ class OverlayController(
                 1 -> EpdController.handwritingRepaint(sv, r)
                 2 -> EpdController.refreshScreenRegion(sv, r.left, r.top, r.width(), r.height(), UpdateMode.GC)
                 3 -> EpdController.refreshScreenRegion(sv, r.left, r.top, r.width(), r.height(), UpdateMode.REGAL)
+                4 -> EpdController.refreshScreenRegion(sv, r.left, r.top, r.width(), r.height(), UpdateMode.DU)
+                5 -> EpdController.refreshScreenRegion(sv, r.left, r.top, r.width(), r.height(), UpdateMode.GU)
+                6 -> EpdController.refreshScreenRegion(sv, r.left, r.top, r.width(), r.height(), UpdateMode.GU_FAST)
                 else -> return
             }
             Log.i(TAG, "repaint mode=$repaintMode $r")
         } catch (t: Throwable) {
             Log.w(TAG, "repaint failed: ${t.message}")
+        }
+    }
+
+    /** Give the screen back to the app underneath. */
+    private fun release(why: String) {
+        waitingSince = 0L
+        if (!renderOn) return
+        setRender(false, why)
+        releasedAt = SystemClock.uptimeMillis()
+        if (cutShort || repaintAlways) {
+            main.postDelayed({ repaintWritten() }, if (repaintAlways) REPAINT_SOON_MS else RELEASE_HOLD_MS)
+        } else synchronized(written) {
+            // The panel refreshes this by itself. Kept in case the next pen-down cuts that short.
+            released.set(written)
+            written.setEmpty()
+        }
+    }
+
+    /** A release put off because the pen was still near: made once the pen has gone, or has hovered long enough. */
+    private val releaseWhenClear = object : Runnable {
+        override fun run() {
+            val since = waitingSince
+            if (since == 0L || helper == null || strokeActive) return
+            val now = SystemClock.uptimeMillis()
+            when {
+                now - lastPenAt >= PEN_NEAR_MS -> release("pen up, pen gone")
+                now - since >= HOVER_HOLD_MAX_MS -> release("pen up, still hovering")
+                else -> main.postDelayed(this, RELEASE_TICK_MS)
+            }
         }
     }
 
@@ -374,6 +415,7 @@ class OverlayController(
     private val callback = object : RawInputCallback() {
         override fun onBeginRawDrawing(b: Boolean, tp: TouchPoint) {
             lastPenAt = SystemClock.uptimeMillis()
+            waitingSince = 0L
             if (lastPenAt - releasedAt < RELEASE_HOLD_MS) synchronized(written) {
                 // The pen came down while the panel was still refreshing the last release: that
                 // area may be left half drawn, so it is repainted with what is written next.
@@ -438,15 +480,17 @@ class OverlayController(
 
         override fun onPenUpRefresh(refreshRect: RectF) {
             if (strokeActive) return
-            setRender(false, "pen up")
-            releasedAt = SystemClock.uptimeMillis()
-            if (cutShort) {
-                main.postDelayed({ repaintWritten() }, RELEASE_HOLD_MS)
-            } else synchronized(written) {
-                // The panel refreshes this by itself. Kept in case the next pen-down cuts that short.
-                released.set(written)
-                written.setEmpty()
+            val now = SystemClock.uptimeMillis()
+            if (now - lastPenAt < PEN_NEAR_MS) {
+                // The pen is still over the page: more writing is likely on its way, and a
+                // release now would be taken back mid-refresh by the next stroke. Wait for the
+                // pen to leave, or for the hover to outlast a pause between letters.
+                waitingSince = now
+                main.removeCallbacks(releaseWhenClear)
+                main.postDelayed(releaseWhenClear, RELEASE_TICK_MS)
+                return
             }
+            release("pen up")
         }
 
         // The eraser end is not handled in this version.
@@ -463,6 +507,12 @@ class OverlayController(
         /** How long the panel is left alone after a release to finish showing the app's strokes. */
         private const val RELEASE_HOLD_MS = 350L
         private const val REPAINT_PAD_PX = 8
+        /** A pen heard from this recently is still over the page. */
+        private const val PEN_NEAR_MS = 150L
+        /** How long a hovering pen can put a release off, on top of the pen-up delay. */
+        private const val HOVER_HOLD_MAX_MS = 1200L
+        private const val RELEASE_TICK_MS = 60L
+        private const val REPAINT_SOON_MS = 60L
         private const val HOVER_IDLE_MS = 1500L
         private const val WATCHDOG_TICK_MS = 500L
     }

@@ -118,7 +118,7 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Debug builds only: `am start -n dev.booxinkbridge/.MainActivity --ei trim 70 --ei style 1 --ei repaint 2`
+     * Debug builds only: `am start -n dev.booxinkbridge/.MainActivity --ei trim 70 --ei style 1 --ei repaint 2 --ei always 0`
      * sets the preview trim and the firmware line style, so both can be tried from a computer
      * while someone writes.
      */
@@ -132,7 +132,8 @@ class MainActivity : Activity() {
                     .coerceIn(BridgeService.MIN_PREVIEW_TRIM, BridgeService.MAX_PREVIEW_TRIM),
             )
         }
-        if (intent.hasExtra("repaint")) edit.putInt(BridgeService.KEY_REPAINT_MODE, intent.getIntExtra("repaint", 1).coerceIn(0, 3))
+        if (intent.hasExtra("repaint")) edit.putInt(BridgeService.KEY_REPAINT_MODE, intent.getIntExtra("repaint", 4).coerceIn(0, 6))
+        if (intent.hasExtra("always")) edit.putBoolean(BridgeService.KEY_REPAINT_ALWAYS, intent.getIntExtra("always", 0) != 0)
         if (intent.hasExtra("style")) edit.putInt(BridgeService.KEY_STROKE_STYLE, intent.getIntExtra("style", 0).coerceIn(0, 7))
         edit.commit()
     }
