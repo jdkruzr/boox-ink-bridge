@@ -3,6 +3,7 @@ package dev.booxinkbridge
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -17,7 +18,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 
-/** Permissions, status, and the one setting. */
+/** Permissions, status, and the two settings. */
 class MainActivity : Activity() {
 
     private val main = Handler(Looper.getMainLooper())
@@ -28,6 +29,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        tuneFromIntent(intent)
         val pad = (16 * resources.displayMetrics.density).toInt()
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -75,6 +77,26 @@ class MainActivity : Activity() {
             }
         })
 
+        root.addView(TextView(this).apply {
+            text = "\nPreview thickness, in percent. Raise it if the line gets heavier when the pen lifts, lower it if it gets lighter."
+            textSize = 16f
+        })
+        val trim = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(prefs.getInt(BridgeService.KEY_PREVIEW_TRIM, BridgeService.DEFAULT_PREVIEW_TRIM).toString())
+        }
+        root.addView(trim)
+        root.addView(Button(this).apply {
+            text = "Save thickness"
+            setOnClickListener {
+                val percent = trim.text.toString().toIntOrNull()
+                    ?.coerceIn(BridgeService.MIN_PREVIEW_TRIM, BridgeService.MAX_PREVIEW_TRIM) ?: BridgeService.DEFAULT_PREVIEW_TRIM
+                trim.setText(percent.toString())
+                prefs.edit().putInt(BridgeService.KEY_PREVIEW_TRIM, percent).apply()
+                startBridge()
+            }
+        })
+
         root.addView(Button(this).apply {
             text = "Forget every app allowed to connect"
             setOnClickListener { prefs.edit().remove(BridgeService.KEY_PAIRED).apply() }
@@ -87,6 +109,32 @@ class MainActivity : Activity() {
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        tuneFromIntent(intent)
+        recreate()
+    }
+
+    /**
+     * Debug builds only: `am start -n dev.booxinkbridge/.MainActivity --ei trim 70 --ei style 1 --ei repaint 2`
+     * sets the preview trim and the firmware line style, so both can be tried from a computer
+     * while someone writes.
+     */
+    private fun tuneFromIntent(intent: Intent?) {
+        if (intent == null || applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
+        val edit = BridgeService.prefs(this).edit()
+        if (intent.hasExtra("trim")) {
+            edit.putInt(
+                BridgeService.KEY_PREVIEW_TRIM,
+                intent.getIntExtra("trim", BridgeService.DEFAULT_PREVIEW_TRIM)
+                    .coerceIn(BridgeService.MIN_PREVIEW_TRIM, BridgeService.MAX_PREVIEW_TRIM),
+            )
+        }
+        if (intent.hasExtra("repaint")) edit.putInt(BridgeService.KEY_REPAINT_MODE, intent.getIntExtra("repaint", 1).coerceIn(0, 3))
+        if (intent.hasExtra("style")) edit.putInt(BridgeService.KEY_STROKE_STYLE, intent.getIntExtra("style", 0).coerceIn(0, 7))
+        edit.commit()
     }
 
     override fun onResume() {

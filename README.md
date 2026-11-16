@@ -21,9 +21,10 @@ Early and working, on one device.
   [Handwriting](https://github.com/jdkruzr/handwriting/tree/boox-bridge) for Obsidian.
   It is not in a released version of that plugin.
 - Notes work. PDF support is written on the plugin side and untested on hardware.
-- The firmware preview is a constant-width line. It is given the pen colour and width
-  selected in the plugin, but its thickness does not yet match the stored stroke, which
-  varies with pressure.
+- The firmware preview is a constant-width line in the pen colour selected in the
+  plugin. Its width is the plugin's estimate of how heavy the stored stroke will be, so
+  the weight holds at pen-up; the stored stroke still varies with pressure and the
+  preview does not.
 - No release builds. You build and sideload it yourself.
 
 ## How it works
@@ -77,6 +78,10 @@ Run the unit tests with `./gradlew :app:testDebugUnitTest`.
 
 **Pen-up delay** is how long after the pen lifts before the app underneath repaints.
 Shorter shows the stored stroke sooner; longer means fewer repaints while you write.
+
+**Preview thickness** scales the firmware line, in percent. Leave it at 100 unless the
+line changes weight when the pen lifts: raise it if the writing gets heavier, lower it if
+it gets lighter.
 
 ## Who can connect
 

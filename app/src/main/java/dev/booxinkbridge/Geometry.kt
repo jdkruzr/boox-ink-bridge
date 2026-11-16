@@ -42,3 +42,10 @@ class Geometry(screenWidthPx: Int, viewportWidthCss: Double, val originX: Int = 
     fun cssX(screenXPx: Double): Double = (screenXPx - originX) / scale
     fun cssY(screenYPx: Double): Double = (screenYPx - originY) / scale
 }
+
+/**
+ * The firmware line's width in screen px: the width the plugin asked for, scaled to the
+ * screen, times the user's trim. Never under one pixel, which the firmware draws as nothing.
+ */
+fun previewWidthPx(widthCss: Double, scale: Double, trimPercent: Int): Float =
+    (widthCss * scale * trimPercent / 100.0).toFloat().coerceAtLeast(1f)

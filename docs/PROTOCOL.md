@@ -25,7 +25,7 @@ screen pixels. The companion converts using the `viewport` it is given:
 |---|---|---|
 | `hello` | `protocol`, `client`, `version`, `token` | First frame after connecting. `token` is the client's pairing secret. |
 | `surface` | `rev`, `kind`, `rect`, `exclude`, `viewport`, `dpr` | Where ink may be drawn. Sent again, with a higher `rev`, whenever anything in it changes. |
-| `pen` | `color`, `width` | Pen colour as `#rrggbb` and nib width in CSS px. |
+| `pen` | `color`, `width` | Pen colour as `#rrggbb`, and the width to draw the line at, in CSS px. The width is the client's estimate of how wide its stored stroke will come out, which is usually less than the nib selected; the companion draws it as given. |
 | `pause` | `reason` | Stop drawing and stop reporting strokes (a tool other than the pen is selected, a dialog is open). |
 | `resume` | | Undo `pause`. |
 | `close` | | There is no ink surface any more. |

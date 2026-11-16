@@ -44,4 +44,12 @@ class GeometryTest {
         assertEquals(PxRect(0, 0, 200, 25), g.localTo(overlay, PxRect(0, 200, 200, 50)))
         assertNull(g.localTo(overlay, PxRect(0, 0, 100, 100)))
     }
+
+    @Test
+    fun previewWidthScalesTrimsAndFloors() {
+        assertEquals(3.0f, previewWidthPx(1.5, 2.0, 100), 1e-6f)
+        assertEquals(1.5f, previewWidthPx(1.5, 2.0, 50), 1e-6f)
+        assertEquals(6.0f, previewWidthPx(1.5, 2.0, 200), 1e-6f)
+        assertEquals(1.0f, previewWidthPx(0.2, 2.0, 100), 1e-6f)
+    }
 }

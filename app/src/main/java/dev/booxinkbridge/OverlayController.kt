@@ -14,6 +14,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.WindowManager
 import com.onyx.android.sdk.api.device.epd.EpdController
+import com.onyx.android.sdk.api.device.epd.UpdateMode
 import com.onyx.android.sdk.data.note.TouchPoint
 import com.onyx.android.sdk.pen.RawInputCallback
 import com.onyx.android.sdk.pen.TouchHelper
@@ -64,6 +65,27 @@ class OverlayController(
         set(value) {
             field = value
             try { helper?.setPenUpRefreshTimeMs(value) } catch (t: Throwable) { Log.w(TAG, "delay: ${t.message}") }
+        }
+    /** The user's trim on the line's width, in percent. */
+    var previewTrimPercent = 100
+        set(value) {
+            field = value
+            applyWidth()
+        }
+    /** How the written area is refreshed after the firmware lets go: 0 not at all, 1 the SDK's handwriting repaint, 2 GC, 3 REGAL. */
+    var repaintMode = 1
+    /** Bounds, in overlay px, of what has been written since the last repaint. */
+    private val written = Rect()
+    /** What was written before the last release, and when that release was. */
+    private val released = Rect()
+    @Volatile private var releasedAt = 0L
+    /** A pen-down interrupted the panel's own refresh after a release, so the next release repaints. */
+    @Volatile private var cutShort = false
+    /** One of TouchHelper's STROKE_STYLE_ values. */
+    var strokeStyle = TouchHelper.STROKE_STYLE_PENCIL
+        set(value) {
+            field = value
+            try { helper?.setStrokeStyle(value) } catch (t: Throwable) { Log.w(TAG, "style: ${t.message}") }
         }
     var originX = 0
     var originY = 0
@@ -179,7 +201,7 @@ class OverlayController(
     private fun attach(sv: SurfaceView) {
         try {
             helper = TouchHelper.create(sv, callback).apply {
-                setStrokeStyle(TouchHelper.STROKE_STYLE_PENCIL)
+                setStrokeStyle(strokeStyle)
                 setStrokeColor(color)
                 setStrokeWidth(strokeWidthPx())
                 setLimitRect(Rect(0, 0, sv.width, sv.height), wantExclude.map { it.toRect() })
@@ -264,11 +286,17 @@ class OverlayController(
         points.clear()
     }
 
-    private fun strokeWidthPx(): Float = (widthCss * (geometry?.scale ?: 1.0)).toFloat().coerceAtLeast(1f)
+    private fun strokeWidthPx(): Float = previewWidthPx(widthCss, geometry?.scale ?: 1.0, previewTrimPercent)
 
     private fun applyWidth() {
-        try { helper?.setStrokeWidth(strokeWidthPx()) } catch (t: Throwable) { Log.w(TAG, "width: ${t.message}") }
+        val px = strokeWidthPx()
+        try { helper?.setStrokeWidth(px) } catch (t: Throwable) { Log.w(TAG, "width: ${t.message}") }
+        if (px != loggedWidthPx) {
+            loggedWidthPx = px
+            Log.i(TAG, "preview width ${px}px (css=$widthCss trim=$previewTrimPercent% style=$strokeStyle)")
+        }
     }
+    private var loggedWidthPx = -1f
 
     private fun setRender(on: Boolean, why: String) {
         if (renderOn == on) return
@@ -279,6 +307,37 @@ class OverlayController(
             Log.i(TAG, "firmware render ${if (on) "on" else "off"} ($why)")
         } catch (t: Throwable) {
             Log.w(TAG, "render $on failed: ${t.message}")
+        }
+    }
+
+    /**
+     * Ask the panel for a clean refresh of what was written.
+     *
+     * When the firmware lets go, the panel swaps its strokes for the app's own. Left alone
+     * that comes out clean. Interrupted, by the firmware taking the screen back for the next
+     * stroke, it stops half way: on a colour panel the strokes stay tinted and blotchy until
+     * something else redraws them. This is that redraw. It flashes, so it runs only after an
+     * interruption, never on an ordinary release.
+     */
+    private fun repaintWritten() {
+        val sv = view ?: return
+        if (renderOn || strokeActive) return
+        cutShort = false
+        if (synchronized(written) { written.isEmpty }) return
+        val pad = (strokeWidthPx() * 2).toInt() + REPAINT_PAD_PX
+        val r = synchronized(written) { Rect(written).also { written.setEmpty() } }
+        r.inset(-pad, -pad)
+        if (!r.intersect(0, 0, sv.width, sv.height)) return
+        try {
+            when (repaintMode) {
+                1 -> EpdController.handwritingRepaint(sv, r)
+                2 -> EpdController.refreshScreenRegion(sv, r.left, r.top, r.width(), r.height(), UpdateMode.GC)
+                3 -> EpdController.refreshScreenRegion(sv, r.left, r.top, r.width(), r.height(), UpdateMode.REGAL)
+                else -> return
+            }
+            Log.i(TAG, "repaint mode=$repaintMode $r")
+        } catch (t: Throwable) {
+            Log.w(TAG, "repaint failed: ${t.message}")
         }
     }
 
@@ -296,6 +355,12 @@ class OverlayController(
     // ---- the pen ---------------------------------------------------------------
 
     private fun wirePoint(tp: TouchPoint): WirePoint {
+        synchronized(written) {
+            val x = tp.x.toInt()
+            val y = tp.y.toInt()
+            // Rect.union(x, y) on an empty rect would stretch it from the origin.
+            if (written.isEmpty) written.set(x, y, x + 1, y + 1) else written.union(x, y)
+        }
         val g = strokeGeometry!!
         val t = if (strokeT0 > 0 && tp.timestamp > 0) tp.timestamp - strokeT0 else SystemClock.uptimeMillis() - strokeClock0
         return WirePoint(
@@ -309,6 +374,12 @@ class OverlayController(
     private val callback = object : RawInputCallback() {
         override fun onBeginRawDrawing(b: Boolean, tp: TouchPoint) {
             lastPenAt = SystemClock.uptimeMillis()
+            if (lastPenAt - releasedAt < RELEASE_HOLD_MS) synchronized(written) {
+                // The pen came down while the panel was still refreshing the last release: that
+                // area may be left half drawn, so it is repainted with what is written next.
+                cutShort = true
+                if (!released.isEmpty) { if (written.isEmpty) written.set(released) else written.union(released) }
+            }
             strokeActive = true
             points.clear()
             val g = geometry
@@ -350,17 +421,32 @@ class OverlayController(
             val end = wirePoint(tp)
             val last = points.lastOrNull()
             if (last == null || last.x != end.x || last.y != end.y) points.add(end)
+            // The top pressure as sent, and the digitizer's scale it was divided by: what to
+            // compare with the pressure the WebView reports for the same push.
+            Log.i(TAG, "stroke $strokeId: ${points.size} points, top pressure ${"%.3f".format(points.maxOf { it.pressure })} of raw max $maxPressure")
             sink.stroke(strokeId, strokeRev, ArrayList(points))
             points.clear()
         }
 
         override fun onPenActive(tp: TouchPoint) {
             lastPenAt = SystemClock.uptimeMillis()
-            if (!renderOn && !paused) setRender(true, "pen in range")
+            // Not straight after a release: the panel is still showing the app's own strokes in
+            // place of the firmware's, and taking the screen back mid-refresh freezes them half
+            // drawn. A pen that touches down in that time takes the screen anyway (pen down).
+            if (!renderOn && !paused && lastPenAt - releasedAt >= RELEASE_HOLD_MS) setRender(true, "pen in range")
         }
 
         override fun onPenUpRefresh(refreshRect: RectF) {
-            if (!strokeActive) setRender(false, "pen up")
+            if (strokeActive) return
+            setRender(false, "pen up")
+            releasedAt = SystemClock.uptimeMillis()
+            if (cutShort) {
+                main.postDelayed({ repaintWritten() }, RELEASE_HOLD_MS)
+            } else synchronized(written) {
+                // The panel refreshes this by itself. Kept in case the next pen-down cuts that short.
+                released.set(written)
+                written.setEmpty()
+            }
         }
 
         // The eraser end is not handled in this version.
@@ -374,6 +460,9 @@ class OverlayController(
 
     companion object {
         private const val TAG = "InkBridge"
+        /** How long the panel is left alone after a release to finish showing the app's strokes. */
+        private const val RELEASE_HOLD_MS = 350L
+        private const val REPAINT_PAD_PX = 8
         private const val HOVER_IDLE_MS = 1500L
         private const val WATCHDOG_TICK_MS = 500L
     }

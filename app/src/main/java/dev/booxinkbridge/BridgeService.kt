@@ -54,6 +54,9 @@ class BridgeService : Service(), BridgeServer.Listener, OverlayController.Sink {
     private fun readSettings() {
         val p = prefs(this)
         overlay.penUpDelayMs = p.getInt(KEY_PEN_UP_DELAY_MS, DEFAULT_PEN_UP_DELAY_MS)
+        overlay.previewTrimPercent = p.getInt(KEY_PREVIEW_TRIM, DEFAULT_PREVIEW_TRIM).coerceIn(MIN_PREVIEW_TRIM, MAX_PREVIEW_TRIM)
+        overlay.strokeStyle = p.getInt(KEY_STROKE_STYLE, 0)
+        overlay.repaintMode = p.getInt(KEY_REPAINT_MODE, 1)
         overlay.originX = p.getInt(KEY_ORIGIN_X, 0)
         overlay.originY = p.getInt(KEY_ORIGIN_Y, 0)
     }
@@ -208,6 +211,13 @@ class BridgeService : Service(), BridgeServer.Listener, OverlayController.Sink {
         const val KEY_ORIGIN_X = "originX"
         const val KEY_ORIGIN_Y = "originY"
         const val DEFAULT_PEN_UP_DELAY_MS = 400
+        const val KEY_PREVIEW_TRIM = "previewTrimPercent"
+        const val DEFAULT_PREVIEW_TRIM = 100
+        const val MIN_PREVIEW_TRIM = 25
+        const val MAX_PREVIEW_TRIM = 300
+        /** Set only from adb on a debug build, for trying the firmware's other line styles. */
+        const val KEY_STROKE_STYLE = "strokeStyle"
+        const val KEY_REPAINT_MODE = "repaintMode"
         const val KEY_PAIRED = "pairedFingerprints"
         const val ACTION_PAIR = "dev.booxinkbridge.PAIR"
         const val EXTRA_FINGERPRINT = "fingerprint"
