@@ -17,5 +17,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "boox-ink-bridge"
 
-include(":spike")
 include(":app")

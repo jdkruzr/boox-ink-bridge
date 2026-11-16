@@ -108,7 +108,6 @@ request only when you have just turned the feature on yourself.
 | `docs/PROTOCOL.md` | The wire format. |
 | `fixtures/` | Example messages, read by this repo's tests and the plugin's. |
 | `tools/handshake.mjs` | Connects from a computer through `adb forward` and prints the reply. |
-| `spike/` | The throwaway app that proved the overlay approach. Kept for reference. |
 
 ## Licence
 
